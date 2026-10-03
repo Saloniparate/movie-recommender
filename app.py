@@ -3,8 +3,12 @@ import pickle
 import pandas as pd
 import requests
 import time
+import os
+
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import CountVectorizer
 
 # 🔑 API KEY
 API_KEY = "f01ed4f75221db45cdc73b6e5201deaa"
@@ -50,52 +54,79 @@ def fetch_poster(movie_id):
         return "https://via.placeholder.com/300x450?text=No+Image"
 
 
-def recommend(movie):
-    movie_index = movies[movies['title'] == movie].index[0]
-    distances = similarity[movie_index]
+# 🎯 RECOMMEND FUNCTION
+def recommend(movie): 
+    movie_index = movies[movies['title'] == movie].index[0] 
+    distances = similarity[movie_index] 
 
-    movies_list = sorted(
-        list(enumerate(distances)),
-        reverse=True,
-        key=lambda x: x[1]
-    )[1:6]
+    movies_list = sorted( 
+        list(enumerate(distances)), 
+        reverse=True, 
+        key=lambda x: x[1] 
+    )[1:6] 
 
-    recommended_movies = []
-    recommended_movies_posters = []
+    recommended_movies = [] 
+    recommended_movies_posters = [] 
 
-    for i in movies_list:
-        movie_row = movies.iloc[i[0]]
+    for i in movies_list: 
+        movie_row = movies.iloc[i[0]] 
+        movie_id = movie_row.get('movie_id') 
 
-        movie_id = movie_row.get('movie_id')
+        recommended_movies.append(movie_row.title) 
+        recommended_movies_posters.append(fetch_poster(movie_id)) 
 
-        recommended_movies.append(movie_row.title)
-        recommended_movies_posters.append(fetch_poster(movie_id))
+        time.sleep(0.2)  # prevents API overload 
 
-        time.sleep(0.2)  # ✅ prevents API overload
-
-    return recommended_movies, recommended_movies_posters
+    return recommended_movies, recommended_movies_posters 
 
 
-# Load data
-movies_dict = pickle.load(open('movies_dict.pkl', 'rb'))
-movies = pd.DataFrame(movies_dict)
+# ✅ LOAD MOVIES
+movies_dict = pickle.load(open('movies_dict.pkl', 'rb')) 
+movies = pd.DataFrame(movies_dict) 
 
-similarity = pickle.load(open('similarity.pkl', 'rb'))
 
-# UI
-st.title('Movie Recommender System')
+# 🔥 CREATE VECTORS SAFELY
+@st.cache_data
+def create_vectors(movies):
+    if 'tags' in movies.columns:
+        text_data = movies['tags']
+    else:
+        # fallback if tags column missing
+        text_data = movies.astype(str).agg(" ".join, axis=1)
 
-selected_movie_name = st.selectbox(
-    'Select a movie:',
-    movies['title'].values
-)
+    cv = CountVectorizer(max_features=5000, stop_words='english')
+    vectors = cv.fit_transform(text_data).toarray()
+    
+    return vectors
 
-if st.button('Show Recommendation'):
-    recommended_movies, recommended_movies_posters = recommend(selected_movie_name)
 
-    cols = st.columns(5)
+# 🔥 LOAD / CREATE SIMILARITY
+@st.cache_data
+def load_similarity(movies):
+    if os.path.exists("similarity.pkl"):
+        return pickle.load(open("similarity.pkl", "rb"))
+    else:
+        vectors = create_vectors(movies)
+        return cosine_similarity(vectors)
 
-    for idx in range(len(recommended_movies)):
-        with cols[idx]:
-            st.text(recommended_movies[idx])
+
+similarity = load_similarity(movies)
+
+
+# 🎨 UI
+st.title('Movie Recommender System') 
+
+selected_movie_name = st.selectbox( 
+    'Select a movie:', 
+    movies['title'].values 
+) 
+
+if st.button('Show Recommendation'): 
+    recommended_movies, recommended_movies_posters = recommend(selected_movie_name) 
+
+    cols = st.columns(5) 
+
+    for idx in range(len(recommended_movies)): 
+        with cols[idx]: 
+            st.text(recommended_movies[idx]) 
             st.image(recommended_movies_posters[idx])
